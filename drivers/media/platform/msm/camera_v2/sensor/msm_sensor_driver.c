@@ -21,9 +21,6 @@
 #include <soc/qcom/camera2.h>
 extern struct vendor_eeprom s_vendor_eeprom[CAMERA_VENDOR_EEPROM_COUNT_MAX];
 #endif
-#ifdef CONFIG_XIAOMI_CLOVER
-#include <linux/hardware_info.h>
-#endif
 /* Logging macro */
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
@@ -1518,7 +1515,7 @@ int32_t msm_sensor_driver_probe(void *setting,
 						(s_vendor_eeprom[j].module_id == MID_OFILM))
 						|| ((strcmp(slave_info->eeprom_name,"tulip_s5k5e8_qtech_ii") == 0) &&
 						(s_vendor_eeprom[j].module_id == MID_QTECH))
-						|| ((strcmp(slave_info->eeprom_name,"tulip_ov02a10_ofilm_ii") == 0) &&
+						|| ((strcmp(slave_info->eeprom_name,"tulip_ov02a10_ofilm_ii") == 0) && 
 						(s_vendor_eeprom[j].module_id == MID_OFILM))
 						|| ((strcmp(slave_info->eeprom_name,"tulip_ov02a10_sunny_i") == 0) &&
 						(s_vendor_eeprom[j].module_id == MID_SUNNY))) {
