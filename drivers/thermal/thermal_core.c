@@ -48,6 +48,11 @@
 
 #define THERMAL_UEVENT_DATA "type"
 
+#if defined(CONFIG_MACH_MI) && defined(CONFIG_FB)
+#include <linux/notifier.h>
+#include <linux/fb.h>
+#endif
+
 MODULE_AUTHOR("Zhang Rui");
 MODULE_DESCRIPTION("Generic thermal management sysfs support");
 MODULE_LICENSE("GPL v2");
@@ -64,6 +69,20 @@ static DEFINE_MUTEX(thermal_list_lock);
 static DEFINE_MUTEX(thermal_governor_lock);
 
 static struct thermal_governor *def_governor;
+
+#ifdef CONFIG_MACH_MI
+#ifdef CONFIG_FB
+struct screen_monitor {
+	struct notifier_block thermal_notifier;
+	int screen_state; /* 1: on; 0:off */
+};
+
+struct screen_monitor sm;
+#endif
+
+static atomic_t switch_mode = ATOMIC_INIT(-1);
+static atomic_t temp_state = ATOMIC_INIT(0);
+#endif
 
 static struct thermal_governor *__find_governor(const char *name)
 {
@@ -1889,6 +1908,10 @@ static struct class thermal_class = {
 	.dev_release = thermal_release,
 };
 
+#ifdef CONFIG_MACH_MI
+static struct device thermal_message_dev;
+#endif
+
 /**
  * __thermal_cooling_device_register() - register a new thermal cooling device
  * @np:		a pointer to a device tree node.
@@ -2793,57 +2816,6 @@ static int screen_state_for_thermal_callback(struct notifier_block *nb, unsigned
 }
 #endif
 #endif
-#ifdef CONFIG_XIAOMI_CLOVER
-unsigned int sconfig;
-
-static ssize_t sconfig_show(struct device *dev,struct device_attribute *attr, char *buf)
-{
-	pr_err("sconfig_show sconfig = %d\n",sconfig);
-
-	return sprintf(buf, "%d\n", sconfig);
-}
-
-static ssize_t sconfig_store(struct device *dev,
-			  struct device_attribute *attr, const char *buf, size_t size)
-{
-	int ret;
-
-	sysfs_notify(&dev->kobj, NULL, "sconfig");
-
-	ret = kstrtoint(buf, 0, &sconfig);
-	if (ret)
-		return ret;
-
-	pr_err("sconfig_store sconfig = %d\n",sconfig);
-
-	return size;
-}
-
-static struct device_attribute dev_attr_thermal_config = {
-	.attr = {
-		.name = "sconfig",
-		.mode = 0666,
-	},
-	.show = sconfig_show,
-	.store = sconfig_store,
-};
-
-void thermalsconfig_init(void)
-{
-	static struct device *dev;
-
-	int result;
-	dev = device_create(&thermal_class, NULL, MKDEV(0, 0), NULL, "thermal_message");
-	if (IS_ERR(dev)) {
-		result = PTR_ERR(dev);
-		printk(KERN_ALERT "Failed to create device.\n");
-	}
-	result = device_create_file(dev, &dev_attr_thermal_config);
-	if (result < 0) {
-		printk(KERN_ALERT"Failed to create attribute file.");
-	}
-}
-#endif
 
 static int __init thermal_init(void)
 {
@@ -2883,9 +2855,6 @@ static int __init thermal_init(void)
 	}
 #endif
 #endif
-#ifdef CONFIG_XIAOMI_CLOVER
-	thermalsconfig_init();
-#endif
 
 	return 0;
 
@@ -2906,8 +2875,17 @@ error:
 
 static void __exit thermal_exit(void)
 {
+#ifdef CONFIG_MACH_MI
+#ifdef CONFIG_FB
+	fb_unregister_client(&sm.thermal_notifier);
+#endif
+	free_thermal_message();
+#endif
 	of_thermal_destroy_zones();
 	genetlink_exit();
+#ifdef CONFIG_MACH_MI
+	destroy_thermal_message_node();
+#endif
 	class_unregister(&thermal_class);
 	thermal_unregister_governors();
 	idr_destroy(&thermal_tz_idr);
