@@ -1,4 +1,5 @@
 /* Copyright (c) 2008-2020, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2019 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -339,7 +340,7 @@ struct msm_fb_data_type {
 	struct task_struct *disp_thread;
 	atomic_t commits_pending;
 	atomic_t kickoff_pending;
-#if defined(CONFIG_MACH_XIAOMI_SDM660) || defined(CONFIG_XIAOMI_CLOVER)
+#ifdef CONFIG_MACH_MI
 	atomic_t resume_pending;
 	wait_queue_head_t resume_wait_q;
 #endif

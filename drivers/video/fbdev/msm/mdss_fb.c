@@ -48,6 +48,10 @@
 #include <linux/dma-buf.h>
 #include <sync.h>
 #include <sw_sync.h>
+#ifdef CONFIG_MACH_MI
+#include <linux/interrupt.h>
+#include <linux/wakelock.h>
+#endif
 
 #ifdef CONFIG_XIAOMI_CLOVER
 #include <linux/mdss_io_util.h>
@@ -95,6 +99,9 @@ extern int LCM_effect[4];
 
 static struct fb_info *fbi_list[MAX_FBI_LIST];
 static int fbi_list_index;
+#ifdef CONFIG_MACH_MI
+static struct msm_fb_data_type *mfd_data;
+#endif
 
 static u32 mdss_fb_pseudo_palette[16] = {
 	0x00000000, 0xffffffff, 0xffffffff, 0xffffffff,
@@ -134,7 +141,7 @@ static int mdss_fb_send_panel_event(struct msm_fb_data_type *mfd,
 static void mdss_fb_set_mdp_sync_pt_threshold(struct msm_fb_data_type *mfd,
 		int type);
 
-#if defined(CONFIG_MACH_XIAOMI_SDM660) || defined(CONFIG_XIAOMI_CLOVER)
+#ifdef CONFIG_MACH_MI
 #define WAIT_RESUME_TIMEOUT 200
 static struct fb_info *prim_fbi;
 static struct delayed_work prim_panel_work;
@@ -1466,9 +1473,6 @@ void mdss_fb_prim_panel_recover(void)
 }
 #endif
 
-#ifdef CONFIG_XIAOMI_CLOVER
-static int ffbm_first_close_bl;
-#endif
 static int mdss_fb_probe(struct platform_device *pdev)
 {
 	struct msm_fb_data_type *mfd = NULL;
@@ -1634,6 +1638,25 @@ static int mdss_fb_probe(struct platform_device *pdev)
 
 	INIT_DELAYED_WORK(&mfd->idle_notify_work, __mdss_fb_idle_notify_work);
 
+#ifdef CONFIG_MACH_MI
+	if (mfd->panel_info->esd_err_irq > 0) {
+		if (mfd->panel_info->esd_interrupt_flags) {
+			rc = request_threaded_irq(mfd->panel_info->esd_err_irq, NULL,
+				esd_err_irq_handle, (unsigned long)mfd->panel_info->esd_interrupt_flags,
+				"esd_err_irq", mfd);
+			if (rc < 0) {
+				pr_err("%s: request irq %d, flag:0x%x  failed\n", __func__, mfd->panel_info->esd_err_irq,
+					mfd->panel_info->esd_interrupt_flags);
+			}
+		}
+	}
+
+	if (mfd->panel_info->is_prim_panel) {
+		mfd_data = mfd;
+		pdata->panel_dead_report = mdss_fb_prim_panel_recover;
+	}
+#endif
+
 	return rc;
 }
 
@@ -1668,7 +1691,7 @@ static int mdss_fb_remove(struct platform_device *pdev)
 	if (!mfd)
 		return -ENODEV;
 
-#if defined(CONFIG_MACH_XIAOMI_SDM660) || defined(CONFIG_XIAOMI_CLOVER)
+#ifdef CONFIG_MACH_MI
 	if (mfd->panel_info && mfd->panel_info->is_prim_panel) {
 		atomic_set(&prim_panel_is_on, false);
 		cancel_delayed_work_sync(&prim_panel_work);
@@ -1850,7 +1873,7 @@ static int mdss_fb_resume(struct platform_device *pdev)
 #endif
 
 #ifdef CONFIG_PM_SLEEP
-#if defined(CONFIG_MACH_XIAOMI_SDM660) || defined(CONFIG_XIAOMI_CLOVER)
+#ifdef CONFIG_MACH_MI
 static int mdss_fb_pm_prepare(struct device *dev)
 {
 	struct msm_fb_data_type *mfd = dev_get_drvdata(dev);
@@ -1930,7 +1953,7 @@ static int mdss_fb_pm_resume(struct device *dev)
 #endif
 
 static const struct dev_pm_ops mdss_fb_pm_ops = {
-#if defined(CONFIG_MACH_XIAOMI_SDM660) || defined(CONFIG_XIAOMI_CLOVER)
+#ifdef CONFIG_MACH_MI
 	.prepare = mdss_fb_pm_prepare,
 	.complete = mdss_fb_pm_complete,
 #endif
@@ -2376,7 +2399,7 @@ static int mdss_fb_blank(int blank_mode, struct fb_info *info)
 	struct mdss_panel_data *pdata;
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 
-#if defined(CONFIG_MACH_XIAOMI_SDM660) || defined(CONFIG_XIAOMI_CLOVER)
+#ifdef CONFIG_MACH_MI
 	if ((info == prim_fbi) && (blank_mode == FB_BLANK_UNBLANK) &&
 		atomic_read(&prim_panel_is_on)) {
 		atomic_set(&prim_panel_is_on, false);
@@ -3022,7 +3045,7 @@ static int mdss_fb_register(struct msm_fb_data_type *mfd)
 	atomic_set(&mfd->commits_pending, 0);
 	atomic_set(&mfd->ioctl_ref_cnt, 0);
 	atomic_set(&mfd->kickoff_pending, 0);
-#if defined(CONFIG_MACH_XIAOMI_SDM660) || defined(CONFIG_XIAOMI_CLOVER)
+#ifdef CONFIG_MACH_MI
 	atomic_set(&mfd->resume_pending, 0);
 #endif
 
@@ -3040,7 +3063,7 @@ static int mdss_fb_register(struct msm_fb_data_type *mfd)
 	init_waitqueue_head(&mfd->idle_wait_q);
 	init_waitqueue_head(&mfd->ioctl_q);
 	init_waitqueue_head(&mfd->kickoff_wait_q);
-#if defined(CONFIG_MACH_XIAOMI_SDM660) || defined(CONFIG_XIAOMI_CLOVER)
+#ifdef CONFIG_MACH_MI
 	init_waitqueue_head(&mfd->resume_wait_q);
 #endif
 
@@ -3060,6 +3083,14 @@ static int mdss_fb_register(struct msm_fb_data_type *mfd)
 	mdss_panel_debugfs_init(panel_info, panel_name);
 	pr_info("FrameBuffer[%d] %dx%d registered successfully!\n", mfd->index,
 					fbi->var.xres, fbi->var.yres);
+#ifdef CONFIG_MACH_MI
+	if (panel_info->is_prim_panel) {
+		prim_fbi = fbi;
+		atomic_set(&prim_panel_is_on, false);
+		INIT_DELAYED_WORK(&prim_panel_work, prim_panel_off_delayed_work);
+		wake_lock_init(&prim_panel_wakelock, WAKE_LOCK_SUSPEND, "prim_panel_wakelock");
+	}
+#endif
 
 #ifdef CONFIG_XIAOMI_CLOVER
 	if (panel_info->is_prim_panel) {
@@ -5524,6 +5555,25 @@ int mdss_fb_get_phys_info(dma_addr_t *start, unsigned long *len, int fb_num)
 }
 EXPORT_SYMBOL(mdss_fb_get_phys_info);
 
+#ifdef CONFIG_MACH_MI
+bool mdss_panel_is_prim(void *fbinfo)
+{
+	struct msm_fb_data_type *mfd;
+	struct mdss_panel_info *pinfo;
+	struct fb_info *fbi = fbinfo;
+
+	if (!fbi)
+		return false;
+	mfd = fbi->par;
+	if (!mfd)
+		return false;
+	pinfo = mfd->panel_info;
+	if (!pinfo)
+		return false;
+	return pinfo->is_prim_panel;
+}
+#endif
+
 int __init mdss_fb_init(void)
 {
 	int rc = -ENODEV;
@@ -5691,3 +5741,60 @@ void mdss_fb_idle_pc(struct msm_fb_data_type *mfd)
 		sysfs_notify(&mfd->fbi->dev->kobj, NULL, "idle_power_collapse");
 	}
 }
+
+#ifdef CONFIG_MACH_MI
+/*
+ * mdss_prim_panel_fb_unblank() - Unblank primary panel FB
+ * @timeout : >0 blank primary panel FB after timeout (ms)
+ */
+int mdss_prim_panel_fb_unblank(int timeout)
+{
+	int ret = 0;
+	struct msm_fb_data_type *mfd = NULL;
+
+	if (prim_fbi) {
+		mfd = (struct msm_fb_data_type *)prim_fbi->par;
+		ret = wait_event_timeout(mfd->resume_wait_q,
+				!atomic_read(&mfd->resume_pending),
+				msecs_to_jiffies(WAIT_RESUME_TIMEOUT));
+		if (!ret) {
+			pr_info("Primary fb resume timeout\n");
+			return -ETIMEDOUT;
+		}
+#ifdef CONFIG_FRAMEBUFFER_CONSOLE
+		console_lock();
+#endif
+		if (!lock_fb_info(prim_fbi)) {
+#ifdef CONFIG_FRAMEBUFFER_CONSOLE
+			console_unlock();
+#endif
+			return -ENODEV;
+		}
+		if (prim_fbi->blank == FB_BLANK_UNBLANK) {
+			unlock_fb_info(prim_fbi);
+#ifdef CONFIG_FRAMEBUFFER_CONSOLE
+			console_unlock();
+#endif
+			return 0;
+		}
+		wake_lock(&prim_panel_wakelock);
+		ret = fb_blank(prim_fbi, FB_BLANK_UNBLANK);
+		if (!ret) {
+			atomic_set(&prim_panel_is_on, true);
+			if (timeout > 0)
+				schedule_delayed_work(&prim_panel_work, msecs_to_jiffies(timeout));
+			else
+				wake_unlock(&prim_panel_wakelock);
+		} else
+			wake_unlock(&prim_panel_wakelock);
+		unlock_fb_info(prim_fbi);
+#ifdef CONFIG_FRAMEBUFFER_CONSOLE
+		console_unlock();
+#endif
+		return ret;
+	}
+
+	pr_err("primary panel is not existed\n");
+	return -EINVAL;
+}
+#endif
