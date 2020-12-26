@@ -43,10 +43,18 @@
 #define SCM_IO_DISABLE_PMIC_ARBITER	1
 #define SCM_IO_DEASSERT_PS_HOLD		2
 #define SCM_WDOG_DEBUG_BOOT_PART	0x9
+#ifdef CONFIG_MACH_XIAOMI_JASON
+#define SCM_DLOAD_FULLDUMP		0X18
+#else
 #define SCM_DLOAD_FULLDUMP		0X10
+#endif
 #define SCM_EDLOAD_MODE			0X01
 #define SCM_DLOAD_CMD			0x10
+#ifdef CONFIG_MACH_XIAOMI_JASON
+#define SCM_DLOAD_MINIDUMP		0X28
+#else
 #define SCM_DLOAD_MINIDUMP		0X20
+#endif
 #define SCM_DLOAD_BOTHDUMPS	(SCM_DLOAD_MINIDUMP | SCM_DLOAD_FULLDUMP)
 
 static int restart_mode;
@@ -72,7 +80,11 @@ static void scm_disable_sdi(void);
 
 static int in_panic;
 static int dload_type = SCM_DLOAD_FULLDUMP;
-static int download_mode = 1;
+#if defined(CONFIG_MACH_LONGCHEER) || defined(CONFIG_MACH_XIAOMI_CLOVER) || defined(CONFIG_MACH_XIAOMI_JASON)
+int download_mode;
+#else
+int download_mode = 1;
+#endif
 static struct kobject dload_kobj;
 static void *dload_mode_addr, *dload_type_addr;
 static bool dload_mode_enabled;
@@ -301,6 +313,13 @@ static void msm_restart_prepare(const char *cmd)
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_HARD_RESET);
 	}
 
+#if defined(CONFIG_MACH_LONGCHEER) || defined(CONFIG_MACH_XIAOMI_CLOVER) || defined(CONFIG_MACH_XIAOMI_JASON)
+	if (in_panic) {
+		qpnp_pon_set_restart_reason(PON_RESTART_REASON_PANIC);
+		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
+		__raw_writel(0x77665508, restart_reason);
+	} else
+#endif
 	if (cmd != NULL) {
 		if (!strncmp(cmd, "bootloader", 10)) {
 			qpnp_pon_set_restart_reason(
@@ -350,18 +369,28 @@ static void msm_restart_prepare(const char *cmd)
 				__raw_writel(0x6f656d00 | (code & 0xff),
 					     restart_reason);
 			}
+#ifdef CONFIG_MACH_XIAOMI_CLOVER
+		} else if (!strcmp(cmd, "other")) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_OTHER);
+			__raw_writel(0x77665501, restart_reason);
+#endif
 		} else if (!strncmp(cmd, "edl", 3)) {
+#if defined(CONFIG_MACH_LONGCHEER) || defined(CONFIG_MACH_XIAOMI_JASON)
+			if (0)
+				enable_emergency_dload_mode();
+			else
+				pr_notice("This command already been disabled\n");
+#else
 			enable_emergency_dload_mode();
+#endif
 		} else {
-#ifdef CONFIG_MACH_LONGCHEER
+#if defined(CONFIG_MACH_LONGCHEER) || defined(CONFIG_MACH_XIAOMI_CLOVER) || defined(CONFIG_MACH_XIAOMI_JASON)
 			qpnp_pon_set_restart_reason(PON_RESTART_REASON_NORMAL);
 #endif
 			__raw_writel(0x77665501, restart_reason);
 		}
-#ifdef CONFIG_MACH_LONGCHEER
-	} else if (in_panic) {
-		qpnp_pon_set_restart_reason(PON_RESTART_REASON_PANIC);
-		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
+#if defined(CONFIG_MACH_LONGCHEER) || defined(CONFIG_MACH_XIAOMI_CLOVER)
 	} else {
 		qpnp_pon_set_restart_reason(PON_RESTART_REASON_NORMAL);
 		__raw_writel(0x77665501, restart_reason);
